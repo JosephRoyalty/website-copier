@@ -17,6 +17,8 @@
             padding: 10px;
             height: 200px;
             overflow-y: scroll;
+            white-space: pre-wrap;
+            background-color: #f9f9f9;
         }
     </style>
 </head>
@@ -37,17 +39,32 @@
             const url = document.getElementById('url').value;
             const logDiv = document.getElementById('log');
 
-            logDiv.innerHTML = '<p>Starting download...</p>';
+            const ws = new WebSocket('ws://localhost:8000/copy');
 
-            fetch(`/copy?url=${encodeURIComponent(url)}`)
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success) {
-                        logDiv.innerHTML += '<p>Download complete. <a href="copied_website/index.html" download>Download the website</a></p>';
-                    } else {
-                        logDiv.innerHTML += `<p>Error: ${data.message}</p>`;
-                    }
-                });
+            ws.onopen = () => {
+                logDiv.innerHTML = '<p>Starting download...</p>';
+                ws.send(JSON.stringify({ url: url }));
+            };
+
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                logDiv.innerHTML += `<p>${data.message}</p>`;
+                logDiv.scrollTop = logDiv.scrollHeight;
+
+                if (data.complete) {
+                    logDiv.innerHTML += '<p>Download complete. <a href="copied_website/index.html" download>Download the website</a></p>';
+                    ws.close();
+                }
+            };
+
+            ws.onerror = (error) => {
+                logDiv.innerHTML += `<p>Error: ${error.message}</p>`;
+                ws.close();
+            };
+
+            ws.onclose = () => {
+                logDiv.innerHTML += '<p>Connection closed.</p>';
+            };
         });
     </script>
 </body>
