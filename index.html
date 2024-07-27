@@ -39,7 +39,7 @@
             const url = document.getElementById('url').value;
             const logDiv = document.getElementById('log');
 
-            const ws = new WebSocket('ws://localhost:8000/copy');
+            const ws = new WebSocket('ws://localhost:8001');
 
             ws.onopen = () => {
                 logDiv.innerHTML = '<p>Starting download...</p>';
@@ -52,14 +52,12 @@
                 logDiv.scrollTop = logDiv.scrollHeight;
 
                 if (data.complete) {
-                    logDiv.innerHTML += '<p>Download complete. <a href="copied_website/index.html" download>Download the website</a></p>';
-                    ws.close();
+                    logDiv.innerHTML += '<p>Download complete!</p>';
                 }
             };
 
             ws.onerror = (error) => {
                 logDiv.innerHTML += `<p>Error: ${error.message}</p>`;
-                ws.close();
             };
 
             ws.onclose = () => {
