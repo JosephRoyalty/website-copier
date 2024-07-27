@@ -21,112 +21,69 @@
     <div id="log"></div>
 
     <script>
-        const form = document.getElementById('copyForm');
-        const logDiv = document.getElementById('log');
-
-        form.addEventListener('submit', async (event) => {
+        document.getElementById('copyForm').addEventListener('submit', async (event) => {
             event.preventDefault();
             const url = document.getElementById('url').value;
             logDiv.innerHTML = ''; // Clear log
-            await copyWebsite(url);
-        });
 
-        async function copyWebsite(url) {
             appendLog(`Starting to copy website: ${url}`);
+
             try {
                 const response = await fetch(url);
-                const html = await response.text();
-                const baseUrl = new URL(url).origin;
-
+                if (!response.ok) throw new Error(`Network response was not ok ${response.statusText}`);
+                
+                let html = await response.text();
                 const parser = new DOMParser();
                 const doc = parser.parseFromString(html, 'text/html');
 
-                await processHtml(doc, baseUrl);
+                await processResources(doc, url);
 
-                const updatedHtml = new XMLSerializer().serializeToString(doc);
-                downloadContent(updatedHtml, 'index.html');
-                appendLog(`Website content successfully copied.`);
+                const serializedHTML = new XMLSerializer().serializeToString(doc);
+                const blob = new Blob([serializedHTML], { type: 'text/html' });
+                const downloadLink = document.createElement('a');
+                downloadLink.href = URL.createObjectURL(blob);
+                downloadLink.download = 'copied_website.html';
+                downloadLink.textContent = 'Download Copied Website';
+                document.body.appendChild(downloadLink);
+
+                appendLog('Website content successfully copied');
             } catch (error) {
-                appendLog(`An error occurred: ${error.message}`);
+                appendLog(`An error occurred: ${error}`);
             }
-        }
+        });
 
-        async function processHtml(doc, baseUrl) {
-            await processLinks(doc, baseUrl, 'link', 'href', 'css', 'css');
-            await processLinks(doc, baseUrl, 'script', 'src', 'js', 'js');
-            await processLinks(doc, baseUrl, 'img', 'src', 'images', 'images');
-            await processInlineStyles(doc, baseUrl, 'css');
-        }
+        async function processResources(doc, baseUrl) {
+            const resourceTags = [
+                { tag: 'link', attribute: 'href', type: 'css' },
+                { tag: 'script', attribute: 'src', type: 'js' },
+                { tag: 'img', attribute: 'src', type: 'images' },
+            ];
 
-        async function processLinks(doc, baseUrl, tagName, attribute, dirName, folderName) {
-            const elements = doc.getElementsByTagName(tagName);
-            for (const element of elements) {
-                const url = element.getAttribute(attribute);
-                if (url) {
-                    const fullUrl = new URL(url, baseUrl).href;
-                    const filename = sanitizeFilename(fullUrl);
-                    const filePath = `${dirName}/${filename}`;
-                    await downloadFile(fullUrl, filePath);
-                    element.setAttribute(attribute, `${folderName}/${filename}`);
+            for (const { tag, attribute, type } of resourceTags) {
+                const elements = doc.querySelectorAll(`${tag}[${attribute}]`);
+                for (const element of elements) {
+                    const url = new URL(element.getAttribute(attribute), baseUrl).href;
+                    try {
+                        const resource = await fetch(url);
+                        if (!resource.ok) throw new Error(`Failed to fetch ${url}`);
+                        
+                        const blob = await resource.blob();
+                        const resourceURL = URL.createObjectURL(blob);
+                        element.setAttribute(attribute, resourceURL);
+                        appendLog(`Downloaded and replaced ${tag} resource: ${url}`);
+                    } catch (error) {
+                        appendLog(`Failed to download ${tag} resource: ${url}, ${error}`);
+                    }
                 }
             }
-        }
-
-        async function processInlineStyles(doc, baseUrl, cssDir) {
-            const elements = doc.querySelectorAll('[style]');
-            for (const element of elements) {
-                let style = element.getAttribute('style');
-                style = await processCss(style, baseUrl, cssDir);
-                element.setAttribute('style', style);
-            }
-        }
-
-        async function processCss(cssContent, baseUrl, cssDir) {
-            const urlPattern = /url\((.*?)\)/g;
-            let match;
-            while ((match = urlPattern.exec(cssContent)) !== null) {
-                const resourceUrl = match[1].replace(/['"]/g, '');
-                const fullUrl = new URL(resourceUrl, baseUrl).href;
-                const filename = sanitizeFilename(fullUrl);
-                const filePath = `${cssDir}/${filename}`;
-                await downloadFile(fullUrl, filePath);
-                cssContent = cssContent.replace(resourceUrl, `${cssDir}/${filename}`);
-            }
-            return cssContent;
-        }
-
-        function sanitizeFilename(url) {
-            return url.replace(/[^\w\s]/g, '_').replace(/\s+/g, '_');
-        }
-
-        async function downloadFile(url, filename) {
-            try {
-                const response = await fetch(url);
-                const blob = await response.blob();
-                const link = document.createElement('a');
-                link.href = URL.createObjectURL(blob);
-                link.download = filename;
-                link.click();
-                appendLog(`Downloaded: ${filename}`);
-            } catch (error) {
-                appendLog(`Failed to download ${url}: ${error.message}`);
-            }
-        }
-
-        function downloadContent(content, filename) {
-            const blob = new Blob([content], { type: 'text/html' });
-            const link = document.createElement('a');
-            link.href = URL.createObjectURL(blob);
-            link.download = filename;
-            link.click();
         }
 
         function appendLog(message) {
             const logEntry = document.createElement('div');
             logEntry.textContent = message;
             logEntry.classList.add('log-entry');
-            logDiv.appendChild(logEntry);
-            logDiv.scrollTop = logDiv.scrollHeight;
+            document.getElementById('log').appendChild(logEntry);
+            document.getElementById('log').scrollTop = document.getElementById('log').scrollHeight;
         }
     </script>
 </body>
