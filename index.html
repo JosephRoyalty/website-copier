@@ -63,6 +63,7 @@
                 const elements = doc.querySelectorAll(`${tag}[${attribute}]`);
                 for (const element of elements) {
                     const url = new URL(element.getAttribute(attribute), baseUrl).href;
+                    appendLog(`Fetching ${type} resource: ${url}`);
                     try {
                         const resource = await fetch(url);
                         if (!resource.ok) throw new Error(`Failed to fetch ${url}`);
