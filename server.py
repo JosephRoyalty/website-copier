@@ -1,10 +1,12 @@
 import os
 import re
-import requests
 import json
+import requests
 from bs4 import BeautifulSoup
-from urllib.parse import urljoin, urlparse, parse_qs
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from urllib.parse import urljoin, urlparse
+import asyncio
+import websockets
+from http.server import SimpleHTTPRequestHandler, HTTPServer
 
 def sanitize_filename(url):
     """Convert a URL to a valid filename."""
@@ -18,7 +20,7 @@ def ensure_dir(file_path):
     if not os.path.exists(directory):
         os.makedirs(directory)
 
-def download_file(url, file_path):
+async def download_file(url, file_path, websocket):
     """Download a file from a URL and save it to the local file path."""
     try:
         response = requests.get(url, stream=True)
@@ -27,11 +29,11 @@ def download_file(url, file_path):
         with open(file_path, 'wb') as file:
             for chunk in response.iter_content(chunk_size=8192):
                 file.write(chunk)
-        print(f"Downloaded: {file_path}")
+        await websocket.send(json.dumps({"message": f"Downloaded: {file_path}"}))
     except Exception as e:
-        print(f"Failed to download {url}: {e}")
+        await websocket.send(json.dumps({"message": f"Failed to download {url}: {e}"}))
 
-def process_css(css_content, base_url, css_dir):
+async def process_css(css_content, base_url, css_dir, websocket):
     """Process CSS content to download linked resources and update paths."""
     url_pattern = re.compile(r'url\((.*?)\)')
     matches = url_pattern.findall(css_content)
@@ -41,12 +43,12 @@ def process_css(css_content, base_url, css_dir):
         resource_url = urljoin(base_url, match)
         resource_filename = sanitize_filename(resource_url)
         resource_path = os.path.join(css_dir, resource_filename)
-        download_file(resource_url, resource_path)
+        await download_file(resource_url, resource_path, websocket)
         css_content = css_content.replace(match, os.path.join('css', resource_filename))
 
     return css_content
 
-def process_html(html, base_url, output_dir):
+async def process_html(html, base_url, output_dir, websocket):
     """Process HTML content and download linked resources."""
     soup = BeautifulSoup(html, 'html.parser')
 
@@ -58,7 +60,7 @@ def process_html(html, base_url, output_dir):
             css_filename = sanitize_filename(css_url)
             css_path = os.path.join(output_dir, 'css', css_filename)
             css_content = requests.get(css_url).text
-            processed_css = process_css(css_content, base_url, os.path.join(output_dir, 'css'))
+            processed_css = await process_css(css_content, base_url, os.path.join(output_dir, 'css'), websocket)
             with open(css_path, 'w', encoding='utf-8') as css_file:
                 css_file.write(processed_css)
             link['href'] = os.path.join('css', css_filename)
@@ -69,7 +71,7 @@ def process_html(html, base_url, output_dir):
         js_url = urljoin(base_url, src)
         js_filename = sanitize_filename(js_url)
         js_path = os.path.join(output_dir, 'js', js_filename)
-        download_file(js_url, js_path)
+        await download_file(js_url, js_path, websocket)
         script['src'] = os.path.join('js', js_filename)
 
     # Download all images
@@ -78,19 +80,19 @@ def process_html(html, base_url, output_dir):
         img_url = urljoin(base_url, src)
         img_filename = sanitize_filename(img_url)
         img_path = os.path.join(output_dir, 'images', img_filename)
-        download_file(img_url, img_path)
+        await download_file(img_url, img_path, websocket)
         img['src'] = os.path.join('images', img_filename)
 
     # Download background images specified in inline styles
     for tag in soup.find_all(style=True):
         style = tag['style']
-        updated_style = process_css(style, base_url, os.path.join(output_dir, 'css'))
+        updated_style = await process_css(style, base_url, os.path.join(output_dir, 'css'), websocket)
         tag['style'] = updated_style
 
     # Return the updated HTML with local resource paths
     return str(soup)
 
-def copy_website(url, output_file):
+async def copy_website(url, output_file, websocket):
     try:
         response = requests.get(url)
         response.raise_for_status()
@@ -99,43 +101,37 @@ def copy_website(url, output_file):
 
         # Process and save HTML content
         output_dir = os.path.dirname(output_file)
-        updated_html = process_html(html, base_url, output_dir)
+        updated_html = await process_html(html, base_url, output_dir, websocket)
 
         with open(output_file, 'w', encoding='utf-8') as file:
             file.write(updated_html)
 
-        return {"success": True, "message": f"Website content successfully copied to {output_file}"}
+        await websocket.send(json.dumps({"message": f"Website content successfully copied to {output_file}", "complete": True}))
     except Exception as e:
-        return {"success": False, "message": str(e)}
+        await websocket.send(json.dumps({"message": str(e), "complete": True}))
 
-class RequestHandler(BaseHTTPRequestHandler):
+async def handler(websocket, path):
+    data = await websocket.recv()
+    params = json.loads(data)
+    url = params.get('url')
+    if url:
+        await copy_website(url, 'copied_website/index.html', websocket)
 
-    def do_GET(self):
-        if self.path.startswith('/copy'):
-            params = parse_qs(urlparse(self.path).query)
-            url = params.get('url', [None])[0]
-            if url:
-                result = copy_website(url, 'copied_website/index.html')
-                self.send_response(200)
-                self.send_header('Content-type', 'application/json')
-                self.end_headers()
-                self.wfile.write(json.dumps(result).encode())
-            else:
-                self.send_response(400)
-                self.send_header('Content-type', 'application/json')
-                self.end_headers()
-                self.wfile.write(json.dumps({"success": False, "message": "No URL provided"}).encode())
-        else:
-            self.send_response(404)
-            self.send_header('Content-type', 'application/json')
-            self.end_headers()
-            self.wfile.write(json.dumps({"success": False, "message": "Not Found"}).encode())
-
-def run(server_class=HTTPServer, handler_class=RequestHandler, port=8000):
-    server_address = ('', port)
-    httpd = server_class(server_address, handler_class)
-    print(f'Starting server on port {port}...')
+def run_http_server():
+    server_address = ('', 8000)
+    httpd = HTTPServer(server_address, SimpleHTTPRequestHandler)
+    print('HTTP server running on port 8000...')
     httpd.serve_forever()
 
+async def run_websocket_server():
+    async with websockets.serve(handler, "localhost", 8001):
+        print("WebSocket server running on port 8001...")
+        await asyncio.Future()  # Run forever
+
+def run_servers():
+    loop = asyncio.get_event_loop()
+    loop.run_in_executor(None, run_http_server)
+    loop.run_until_complete(run_websocket_server())
+
 if __name__ == "__main__":
-    run()
+    run_servers()
