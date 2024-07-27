@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Website Copier</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+        }
+        form {
+            margin-bottom: 20px;
+        }
+        #log {
+            border: 1px solid #ccc;
+            padding: 10px;
+            height: 200px;
+            overflow-y: scroll;
+        }
+    </style>
+</head>
+<body>
+    <h1>Website Copier</h1>
+    <form id="copyForm">
+        <label for="url">Enter URL:</label>
+        <input type="text" id="url" name="url" required>
+        <button type="submit">Copy Website</button>
+    </form>
+    <div id="log">
+        <p>Log output will be displayed here...</p>
+    </div>
+
+    <script>
+        document.getElementById('copyForm').addEventListener('submit', function(event) {
+            event.preventDefault();
+            const url = document.getElementById('url').value;
+            const logDiv = document.getElementById('log');
+
+            logDiv.innerHTML = '<p>Starting download...</p>';
+
+            fetch(`/copy?url=${encodeURIComponent(url)}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        logDiv.innerHTML += '<p>Download complete. <a href="copied_website/index.html" download>Download the website</a></p>';
+                    } else {
+                        logDiv.innerHTML += `<p>Error: ${data.message}</p>`;
+                    }
+                });
+        });
+    </script>
+</body>
+</html>
